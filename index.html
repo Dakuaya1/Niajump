@@ -1292,14 +1292,17 @@
         updatePowerUps();
         updateEnemies(deltaTime);
         updateHazards(deltaTime);
-        checkCollisions();
+
+        // Check enemy collisions BEFORE platform collisions
+        // This ensures we can stomp enemies even if we're also touching the platform
         checkEnemyCollisions();
+        checkCollisions();
+
         checkPowerUpCollisions();
         checkHazardCollisions();
         updateActivePowerUps(performance.now());
         updateParticles(deltaTime);
         checkGameOver();
-        updateScore();
         updateScore();
 
         // Handle screen shake decay
@@ -1320,6 +1323,51 @@
       requestAnimationFrame(update);
     }
 
+    // ... (updatePlayer and other functions remain) ...
+
+    function checkEnemyCollisions() {
+      if (activePowerUps.invincibility > 0) return;
+
+      enemies.forEach(enemy => {
+        if (enemy.dead) return;
+
+        // AABB Collision
+        if (player.x < enemy.x + enemy.width &&
+          player.x + player.width > enemy.x &&
+          player.y < enemy.y + enemy.height &&
+          player.y + player.height > enemy.y) {
+
+          // Improve stomp detection by checking previous position
+          // If we were above the enemy in the previous frame, it's a stomp
+          // even if we're deep inside them now (due to high speed)
+          const prevY = player.y - player.vy;
+          const wasAbove = prevY + player.height <= enemy.y + enemy.height * 0.5;
+          const isFalling = player.vy > 0;
+
+          if (isFalling && wasAbove) {
+            // KILL ENEMY
+            enemy.dead = true;
+            player.vy = JUMP_FORCE; // Bounce
+            player.onGround = false;
+
+            // Particles
+            createParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ef4444', 10);
+            score += 50; // Bonus score
+
+          } else {
+            // PLAYER HIT
+            if (activePowerUps.shield > 0) {
+              activePowerUps.shield = 0;
+              updatePowerUpUI();
+              enemy.dead = true; // Shield kills enemy
+              createParticles(player.x, player.y, '#8b5cf6', 10);
+            } else {
+              triggerDeath();
+            }
+          }
+        }
+      });
+    }
     function updatePlayer(dt) {
       // Apply slow-mo effect or time freeze
       let timeScale = 1.0;
@@ -1536,7 +1584,7 @@
     }
 
     function checkEnemyCollisions() {
-      if (activePowerUps.invincibility > 0) return; // Invincible players kill enemies on touch? Or just ignore? Let's say ignore or kill. 
+      if (activePowerUps.invincibility > 0) return;
 
       enemies.forEach(enemy => {
         if (enemy.dead) return;
@@ -1547,11 +1595,14 @@
           player.y < enemy.y + enemy.height &&
           player.y + player.height > enemy.y) {
 
-          // Allow kill if falling and hitting top of enemy
+          // Improve stomp detection by checking previous position
+          // If we were above the enemy in the previous frame, it's a stomp
+          // even if we're deep inside them now (due to high speed)
+          const prevY = player.y - player.vy;
+          const wasAbove = prevY + player.height <= enemy.y + enemy.height * 0.5;
           const isFalling = player.vy > 0;
-          const hitTop = player.y + player.height < enemy.y + enemy.height * 0.5; // Hit upper half
 
-          if (isFalling && hitTop) {
+          if (isFalling && wasAbove) {
             // KILL ENEMY
             enemy.dead = true;
             player.vy = JUMP_FORCE; // Bounce
@@ -1561,13 +1612,12 @@
             createParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ef4444', 10);
             score += 50; // Bonus score
 
-            // Floating text?
           } else {
             // PLAYER HIT
             if (activePowerUps.shield > 0) {
               activePowerUps.shield = 0;
               updatePowerUpUI();
-              enemy.dead = true; // Shield kills enemy?
+              enemy.dead = true; // Shield kills enemy
               createParticles(player.x, player.y, '#8b5cf6', 10);
             } else {
               triggerDeath();
@@ -2368,59 +2418,6 @@
           ctx.fill();
           ctx.shadowBlur = 0;
 
-          // Draw Enemies
-          for (let enemy of enemies) {
-            const screenY = enemy.y - camera.y;
-            if (screenY > -50 && screenY < height + 50) {
-              const cx = enemy.x + enemy.width / 2;
-              const cy = screenY + enemy.height / 2;
-
-              if (enemy.type === 'SLIME') {
-                // Draw Slime
-                ctx.fillStyle = '#a3e635'; // Lime scale
-                ctx.beginPath();
-                // rounded top, flat bottom
-                ctx.arc(cx, cy, enemy.width / 2, Math.PI, 0);
-                ctx.lineTo(enemy.x + enemy.width, screenY + enemy.height);
-                ctx.lineTo(enemy.x, screenY + enemy.height);
-                ctx.fill();
-
-                // Slime Face
-                ctx.fillStyle = '#1a2e05';
-                ctx.beginPath();
-                ctx.arc(cx - 4, cy - 2, 2, 0, Math.PI * 2);
-                ctx.arc(cx + 4, cy - 2, 2, 0, Math.PI * 2);
-                ctx.fill();
-
-              } else if (enemy.type === 'BAT') {
-                // Draw Bat
-                ctx.fillStyle = '#818cf8'; // Indigo
-                // Wings
-                const wingFlap = Math.sin(performance.now() * 0.02) * 5;
-                ctx.beginPath();
-                ctx.moveTo(cx, cy);
-                ctx.lineTo(cx - 15, cy - 5 + wingFlap);
-                ctx.lineTo(cx - 5, cy + 5);
-                ctx.fill();
-                ctx.beginPath();
-                ctx.moveTo(cx, cy);
-                ctx.lineTo(cx + 15, cy - 5 + wingFlap);
-                ctx.lineTo(cx + 5, cy + 5);
-                ctx.fill();
-
-                // Body
-                ctx.beginPath();
-                ctx.arc(cx, cy, 6, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Eyes
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(cx - 2, cy - 1, 1, 1);
-                ctx.fillRect(cx + 1, cy - 1, 1, 1);
-              }
-            }
-          }
-
           // Animated pattern
           if (isFireball) {
             // Flame swirls
@@ -2465,6 +2462,61 @@
             ctx.beginPath();
             ctx.arc(trailX, screenY, trailSize, 0, Math.PI * 2);
             ctx.fill();
+          }
+        }
+      }
+
+      // Draw Enemies
+      for (let enemy of enemies) {
+        if (enemy.dead) continue;
+
+        const screenY = enemy.y - camera.y;
+        if (screenY > -50 && screenY < height + 50) {
+          const cx = enemy.x + enemy.width / 2;
+          const cy = screenY + enemy.height / 2;
+
+          if (enemy.type === 'SLIME') {
+            // Draw Slime
+            ctx.fillStyle = '#a3e635'; // Lime green
+            ctx.beginPath();
+            // rounded top, flat bottom
+            ctx.arc(cx, cy, enemy.width / 2, Math.PI, 0);
+            ctx.lineTo(enemy.x + enemy.width, screenY + enemy.height);
+            ctx.lineTo(enemy.x, screenY + enemy.height);
+            ctx.fill();
+
+            // Slime Face
+            ctx.fillStyle = '#1a2e05';
+            ctx.beginPath();
+            ctx.arc(cx - 4, cy - 2, 2, 0, Math.PI * 2);
+            ctx.arc(cx + 4, cy - 2, 2, 0, Math.PI * 2);
+            ctx.fill();
+
+          } else if (enemy.type === 'BAT') {
+            // Draw Bat
+            ctx.fillStyle = '#818cf8'; // Indigo
+            // Wings
+            const wingFlap = Math.sin(performance.now() * 0.02) * 5;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cx - 15, cy - 5 + wingFlap);
+            ctx.lineTo(cx - 5, cy + 5);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cx + 15, cy - 5 + wingFlap);
+            ctx.lineTo(cx + 5, cy + 5);
+            ctx.fill();
+
+            // Body
+            ctx.beginPath();
+            ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Eyes
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(cx - 2, cy - 1, 1, 1);
+            ctx.fillRect(cx + 1, cy - 1, 1, 1);
           }
         }
       }
