@@ -1,4 +1,4 @@
-Briefing Document: "Lean Before You Leap" Game Framework
+
 
 Executive Summary
 
